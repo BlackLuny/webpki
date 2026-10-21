@@ -445,7 +445,9 @@ mod distrust_tests {
     const CROSS_SIGNED: &[u8] = include_bytes!("data/distrusted/tests/cross-signed.der");
     const UNRELATED: &[u8] = include_bytes!("data/distrusted/tests/unrelated.der");
     const LEAF: &[u8] = include_bytes!("data/distrusted/tests/leaf.der");
-    const NOW: time::Time = time::Time::from_seconds_since_unix_epoch(1_800_000_000);
+    fn now() -> time::Time {
+        time::Time::from_seconds_since_unix_epoch(1_800_000_000)
+    }
 
     fn verify(
         leaf: &[u8],
@@ -460,7 +462,7 @@ mod distrust_tests {
             roots,
             intermediates,
             cert.inner(),
-            NOW,
+            now(),
             0,
             &mut Budget::default(),
             distrust,
@@ -514,14 +516,14 @@ mod distrust_tests {
             let cert = EndEntityCert::try_from(*leaf).unwrap();
             assert!(matches!(
                 cert.verify_is_valid_tls_server_cert_ext(
-                    &[&ECDSA_P256_SHA256], &TlsServerTrustAnchors(roots), &[], NOW,
+                    &[&ECDSA_P256_SHA256], &TlsServerTrustAnchors(roots), &[], now(),
                 ),
                 Err(ErrorExt::CertDistrusted)
             ));
             // Old rustls uses this API: it must also reject, without changing Error.
             assert_eq!(
                 cert.verify_is_valid_tls_server_cert(
-                    &[&ECDSA_P256_SHA256], &TlsServerTrustAnchors(roots), &[], NOW,
+                    &[&ECDSA_P256_SHA256], &TlsServerTrustAnchors(roots), &[], now(),
                 ),
                 Err(Error::UnknownIssuer)
             );
