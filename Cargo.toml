@@ -29,6 +29,7 @@ include = [
 
     "LICENSE",
     "README.md",
+    "SECURITY-ZFC.md",
 
     "src/**/*.rs",
     "src/data/**/*",
@@ -83,6 +84,7 @@ codegen-units = 1
 
 [workspace]
 members = [
+    "webpki-roots",
     # Intentionally not a default member.
     "rcgen-tests",
 ]

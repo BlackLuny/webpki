@@ -39,6 +39,7 @@ pub fn build_chain(
         time,
         0,
         &mut Budget::default(),
+        DISTRUSTED_SPKIS,
     )
 }
 
@@ -52,7 +53,12 @@ fn build_chain_inner(
     time: time::Time,
     sub_ca_count: usize,
     budget: &mut Budget,
+    distrusted_spkis: &[&[u8]],
 ) -> Result<(), ErrorExt> {
+    if distrusted_spkis.contains(&cert.spki.value().as_slice_less_safe()) {
+        return Err(ErrorExt::CertDistrusted);
+    }
+
     let used_as_ca = used_as_ca(&cert.ee_or_ca);
 
     check_issuer_independent_properties(
@@ -89,7 +95,9 @@ fn build_chain_inner(
 
         let trust_anchor_spki = untrusted::Input::from(trust_anchor.spki);
 
-        // TODO: check_distrust(trust_anchor_subject, trust_anchor_spki)?;
+        if distrusted_spkis.contains(&trust_anchor.spki) {
+            return Err(ErrorExt::CertDistrusted);
+        }
 
         check_signatures(supported_sig_algs, cert, trust_anchor_spki, budget)?;
 
@@ -149,6 +157,7 @@ fn build_chain_inner(
             time,
             next_sub_ca_count,
             budget,
+            distrusted_spkis,
         )
     })
 }
@@ -408,4 +417,114 @@ where
         }
     }
     Err(Error::UnknownIssuer.into())
+}
+
+// Backported from rustls/webpki#546 (RUSTSEC-2026-0382). These are the
+// contents of SPKI SEQUENCEs, without their DER tag/length. Reject by key at
+// every path position, including explicitly configured trust anchors.
+const DISTRUSTED_SPKIS: &[&[u8]] = &[
+    include_bytes!("data/distrusted/EMDVTLSCAG3B.spki.der"),
+    include_bytes!("data/distrusted/EMDVTLSCAG3C.spki.der"),
+    include_bytes!("data/distrusted/EMEVTLSCAG3B.spki.der"),
+    include_bytes!("data/distrusted/EMEVTLSCAG3C.spki.der"),
+    include_bytes!("data/distrusted/EMOVTLSCAG3B.spki.der"),
+    include_bytes!("data/distrusted/EMOVTLSCAG3C.spki.der"),
+    include_bytes!("data/distrusted/EMOVCSCAG3B.spki.der"),
+    include_bytes!("data/distrusted/EMOVCSCAG3C.spki.der"),
+];
+
+#[cfg(test)]
+mod distrust_tests {
+    use super::*;
+    use crate::{EndEntityCert, TlsServerTrustAnchors, ECDSA_P256_SHA256};
+    use core::convert::TryFrom;
+
+    const ROOT: &[u8] = include_bytes!("data/distrusted/tests/root.der");
+    const ISSUER: &[u8] = include_bytes!("data/distrusted/tests/issuer.der");
+    const INTERMEDIATE: &[u8] = include_bytes!("data/distrusted/tests/intermediate.der");
+    const CROSS_SIGNED: &[u8] = include_bytes!("data/distrusted/tests/cross-signed.der");
+    const UNRELATED: &[u8] = include_bytes!("data/distrusted/tests/unrelated.der");
+    const LEAF: &[u8] = include_bytes!("data/distrusted/tests/leaf.der");
+    const NOW: time::Time = time::Time::from_seconds_since_unix_epoch(1_800_000_000);
+
+    fn verify(
+        leaf: &[u8],
+        intermediates: &[&[u8]],
+        roots: &[TrustAnchor],
+        distrust: &[&[u8]],
+    ) -> Result<(), ErrorExt> {
+        let cert = EndEntityCert::try_from(leaf).unwrap();
+        build_chain_inner(
+            EKU_SERVER_AUTH,
+            &[&ECDSA_P256_SHA256],
+            roots,
+            intermediates,
+            cert.inner(),
+            NOW,
+            0,
+            &mut Budget::default(),
+            distrust,
+        )
+    }
+
+    #[test]
+    fn distrust_rejects_every_path_position_and_cross_sign() {
+        let roots = &[TrustAnchor::try_from_cert_der(ROOT).unwrap()];
+        let intermediates = &[INTERMEDIATE, ISSUER, UNRELATED];
+        assert!(verify(LEAF, intermediates, roots, &[]).is_ok());
+        for der in [ROOT, ISSUER, INTERMEDIATE, LEAF] {
+            let anchor = TrustAnchor::try_from_cert_der(der).unwrap();
+            assert!(verify(LEAF, intermediates, roots, &[anchor.spki]).is_err());
+        }
+
+        let unrelated = TrustAnchor::try_from_cert_der(UNRELATED).unwrap();
+        assert!(verify(LEAF, intermediates, roots, &[unrelated.spki]).is_ok());
+
+        let cross_signed = &[INTERMEDIATE, ISSUER, CROSS_SIGNED];
+        let issuer = TrustAnchor::try_from_cert_der(ISSUER).unwrap();
+        assert!(verify(LEAF, cross_signed, roots, &[issuer.spki]).is_ok());
+        let intermediate = TrustAnchor::try_from_cert_der(INTERMEDIATE).unwrap();
+        assert!(verify(LEAF, cross_signed, roots, &[intermediate.spki]).is_err());
+
+        // No issuer is needed to reject a distrusted path node.
+        let leaf = TrustAnchor::try_from_cert_der(LEAF).unwrap();
+        assert!(matches!(
+            verify(LEAF, &[], &[], &[leaf.spki]),
+            Err(ErrorExt::CertDistrusted)
+        ));
+    }
+
+    #[test]
+    fn distrust_real_emsign_public_keys_in_valid_chains() {
+        let roots = &[TrustAnchor::try_from_cert_der(ROOT).unwrap()];
+        let leaves: &[&[u8]] = &[
+            include_bytes!("data/distrusted/tests/EMDVTLSCAG3B.der"),
+            include_bytes!("data/distrusted/tests/EMDVTLSCAG3C.der"),
+            include_bytes!("data/distrusted/tests/EMEVTLSCAG3B.der"),
+            include_bytes!("data/distrusted/tests/EMEVTLSCAG3C.der"),
+            include_bytes!("data/distrusted/tests/EMOVTLSCAG3B.der"),
+            include_bytes!("data/distrusted/tests/EMOVTLSCAG3C.der"),
+            include_bytes!("data/distrusted/tests/EMOVCSCAG3B.der"),
+            include_bytes!("data/distrusted/tests/EMOVCSCAG3C.der"),
+        ];
+        assert_eq!(leaves.len(), DISTRUSTED_SPKIS.len());
+        for leaf in leaves {
+            // A real CA signature makes each leaf valid without the backport.
+            assert!(verify(leaf, &[], roots, &[]).is_ok());
+            let cert = EndEntityCert::try_from(*leaf).unwrap();
+            assert!(matches!(
+                cert.verify_is_valid_tls_server_cert_ext(
+                    &[&ECDSA_P256_SHA256], &TlsServerTrustAnchors(roots), &[], NOW,
+                ),
+                Err(ErrorExt::CertDistrusted)
+            ));
+            // Old rustls uses this API: it must also reject, without changing Error.
+            assert_eq!(
+                cert.verify_is_valid_tls_server_cert(
+                    &[&ECDSA_P256_SHA256], &TlsServerTrustAnchors(roots), &[], NOW,
+                ),
+                Err(Error::UnknownIssuer)
+            );
+        }
+    }
 }

@@ -113,6 +113,8 @@ impl ::std::error::Error for Error {}
 /// declared `#[non_exhaustive]` it could not be directly extended in a backward-compatible way.
 #[non_exhaustive]
 pub enum ErrorExt {
+    /// A certificate or trust anchor contains an explicitly distrusted public key.
+    CertDistrusted,
     Error(Error),
     MaximumSignatureChecksExceeded,
     /// The maximum number of internal path building calls has been reached. Path complexity is too great.
@@ -122,7 +124,7 @@ pub enum ErrorExt {
 impl ErrorExt {
     pub(crate) fn is_fatal(&self) -> bool {
         match self {
-            Self::Error(_) => false,
+            Self::Error(_) | Self::CertDistrusted => false,
             Self::MaximumSignatureChecksExceeded | Self::MaximumPathBuildCallsExceeded => true,
         }
     }
@@ -130,7 +132,9 @@ impl ErrorExt {
     pub(crate) fn into_error_lossy(self) -> Error {
         match self {
             Self::Error(e) => e,
-            Self::MaximumSignatureChecksExceeded | Self::MaximumPathBuildCallsExceeded => {
+            Self::CertDistrusted
+            | Self::MaximumSignatureChecksExceeded
+            | Self::MaximumPathBuildCallsExceeded => {
                 Error::UnknownIssuer
             }
         }
