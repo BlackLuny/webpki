@@ -1,1 +1,3 @@
+# Match the working ZFC compile image; upstream ignores Cargo.lock.
+image = "rc-registry/env/0f5446c3@sha256:d5b6c5288078cbac0c290c341f8d82c70f5d7aa91cb545d9e86c3792665314b4"
 include = ["Cargo.lock"]
