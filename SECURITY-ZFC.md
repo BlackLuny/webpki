@@ -8,7 +8,7 @@ Both packages must be patched at **each final workspace root**. Cargo does not p
 
 The non-exhaustive ErrorExt gains CertDistrusted; the old exhaustive Error API maps it to UnknownIssuer. Distrust is non-fatal to path search, allowing an alternative valid issuer. The no_std and no-allocation behavior of webpki and its old root API is preserved.
 
-Regression checks:
+Regression checks (run `cargo generate-lockfile` first in a fresh checkout; upstream does not track the library workspace lockfile):
 
 ```sh
 cargo test -p webpki --lib --locked
